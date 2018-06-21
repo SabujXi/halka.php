@@ -10,213 +10,147 @@ This framework was developed out of frustration of bulkiness of popular framewor
 */
 
 
-//define('HALKA_BASEDIR', __DIR__);
-//define('HALKA_FRONTSCRIPT', basename(__FILE__));
+if (!defined('HALKA_BASEDIR')){
+    define('HALKA_BASEDIR', __DIR__);
+}
 
+if (!defined('HALKA_FRONTSCRIPT')){
+    define('HALKA_FRONTSCRIPT', basename(__FILE__));
+}
 
-require_once "routes.php";
-require_once BASEDIR . "/views/view_callables/view_functions.php";
-require_once BASEDIR . "/views/view_callables/view_classes.php";
+define('HALKA_VIEWS_DIR', HALKA_BASEDIR . '/' . 'views');
+define('HALKA_VIEWERS_DIR', HALKA_BASEDIR . '/' . 'viewers');
+
+$halka_routes = [];
+$halka_settings = [];
+
+function halka_require_if_exists($fn){
+    // caution: variables are not imported into global space when imported from a function.
+    // works perfectly for functions and classes.
+    if(file_exists('routes.php')){
+        return require_once $fn;
+    }
+    return null;
+}
+
 
 // util functions
-function get_view_file($name){
-	return BASEDIR . "/views/$name.php";
+function halka_get_view_file($name){
+    return HALKA_VIEWS_DIR . '/$name.php';
 }
 
-//
-
-$base_uri = "/";
-$base_uri = trim($base_uri, '/');
-
-
-$uri = $_SERVER['REQUEST_URI'];
-$uri = trim($uri, "/");
-
-//echo "Initial URI: ";
-// print_r($uri); echo PHP_EOL;
-
-$base_match = substr($uri, 0, strlen($base_uri));
-if($base_match === $base_uri && $base_match !== ''){
-	$uri = substr($uri, strlen($base_match));
-	$uri = ltrim($uri, "/");
-	
-	//echo "After base match URI: ";
-	//print_r($uri); echo PHP_EOL;
+function halka_trim_url($url){
+    return trim($url, '/');
 }
-
-$indexphp_match = substr($uri, 0, strlen("index.php"));
-if($indexphp_match === "index.php" && $indexphp_match !== ''){
-	$uri = substr($uri, strlen($indexphp_match));
-	$uri = ltrim($uri, "/");
-	
-	//echo "After index php match URI: ";
-	//print_r($uri); echo PHP_EOL;
-}
-
-
-function to_uri_parts($uri){
-	$uri = trim($uri, '/');
-	return explode("/", $uri);
-}
-
-$uri_parts = to_uri_parts($uri);
-
-//echo "URI: ";
-// print_r($uri); echo PHP_EOL;
-//echo "URI PARTs:";
-// print_r($uri_parts); echo PHP_EOL;
-
-$uri_last_part = $uri_parts[count($uri_parts) - 1];
-
-// print_r($uri_last_part);
-
 
 function starts_with($str, $with){
-	$str_len = strlen($str);
-	$with_len = strlen($with);
-	
-	if ($str_len === 0 || $with_len === 0){
-		return false;
-	}
-	if($with_len > $str_len){
-		return false;
-	}
-	
-	if(substr($str, 0, $with_len) === $with){
-		return true;
-	}
-	
-	return false;
+    $str_len = strlen($str);
+    $with_len = strlen($with);
+
+    if ($str_len === 0 || $with_len === 0){
+        return false;
+    }
+    if($with_len > $str_len){
+        return false;
+    }
+
+    if(substr($str, 0, $with_len) === $with){
+        return true;
+    }
+
+    return false;
 }
 
 
 function ends_with($str, $with){
-	$str_len = strlen($str);
-	$with_len = strlen($with);
-	
-	if ($str_len === 0 || $with_len === 0){
-		return false;
-	}
-	if($with_len > $str_len){
-		return false;
-	}
-	
-	//echo "End str: " . substr($str, -$with_len, $with_len) . PHP_EOL;
-	//echo "With: " . $with . PHP_EOL;
-	
-	if(substr($str, -$with_len, $with_len) === $with){
-		return true;
-	}
-	
-	return false;
+    $str_len = strlen($str);
+    $with_len = strlen($with);
+
+    if ($str_len === 0 || $with_len === 0){
+        return false;
+    }
+    if($with_len > $str_len){
+        return false;
+    }
+
+    //echo "End str: " . substr($str, -$with_len, $with_len) . PHP_EOL;
+    //echo "With: " . $with . PHP_EOL;
+
+    if(substr($str, -$with_len, $with_len) === $with){
+        return true;
+    }
+
+    return false;
 }
 
 
-function get_view_fun(){
-	global $routes, $uri_parts, $uri_last_part;
-	$fun = 'view404';
-	
-	$ends_with = substr($uri_last_part, -4, 4);
-	if($ends_with === ".php"){ // assuming that .php will come in lowercase
-		$fun = 'view_forbidden';
-		return [$fun, []];
-	}
-	
-	foreach($routes as $pattern => $fun_name){
-		if (is_array($fun_name)){
-			$fun = $fun_name[0];
-			$route_name = $fun_name[1];
-		}else{
-			$fun = $fun_name;
-			$route_name = '';
-		}
-			
-		$pat_uri_parts = to_uri_parts($pattern);
-		if ($uri_parts == $pat_uri_parts){
-			return [$fun, []];
-		}else{
-			// match pattern			
-			// break incoming urls into patterns and match them
-			if(count($uri_parts) === count($pat_uri_parts)){
-				// there is no point to match them if they do not contain the same amount of elements.
-				$match_params = [];
-				$all_matched = true;
-				for($i = 0; $i < count($uri_parts); $i++){
-					$uri_part = $uri_parts[$i];
-					$pat_part = $pat_uri_parts[$i];
-					//echo $uri_part . PHP_EOL;
-					//echo $pat_part . PHP_EOL;
-					
-					if ($uri_part != $pat_part){
-						// do pattern matchin
-						$re_pat = '/^(?P<start>.+?)?(?:{(?P<name>[a-zA-Z0-9]+):(?P<regex>[^}]+)})?(?P<end>.*?)$/';
-						$match_res = preg_match($re_pat, $pat_part, $matches);
-						
-						if ($match_res !== 0){
-							if(starts_with($uri_part, $matches['start']) && ends_with($uri_part, $matches['end'])){
-								$mid = substr($uri_part, strlen($matches['start']) - 1, strlen($uri_part) - strlen($matches['start']) - strlen($matches['end']));
-								//echo "Mid: $mid" . PHP_EOL;
-								if(preg_match('/'.$matches['regex'].'/', $uri_part) !== 0){
-									//echo 'Url pattern matched.' . PHP_EOL;
-									$match_params[$matches['name']] = $mid;
-								}else{
-									$all_matched = false;
-									$match_params = [];
-									break;
-								}
-							}else{
-								$all_matched = false;
-								$match_params = [];
-								break;	
-							}
-							// print_r($matches);
-						}else{
-							$all_matched = false;
-							$match_params = [];
-							break;
-						}
-					}else{
-						continue;
-					}
-				}
-				
-				if ($all_matched){
-					//echo "All matched" . PHP_EOL;
-					return [$fun, $match_params];
-				}
-			}
-		}
-	}
-	return [$fun, []];
+function to_uri_parts($uri){
+    $uri = halka_trim_url($uri);
+    return explode("/", $uri);
 }
 
+// require necessary files.
+$routes = halka_require_if_exists(HALKA_BASEDIR . '/routes.php');
+$settings = halka_require_if_exists(HALKA_BASEDIR . '/settings.php');
+halka_require_if_exists(HALKA_BASEDIR . '/viewers/functions.php');
+halka_require_if_exists(HALKA_BASEDIR . '/viewers/classes.php');  // classes can have dependency of functions required above.
 
-class Request{
-	public $route_params = [];	
-	private $session = [];
-	private $defered = [];
-	function __construct($route_params){
-		$this->route_params = $route_params;
-	}
-	
-	function set_session($key, $value){
-		$this->session[$key] = $value;
-	}
-	
-	function defer($cal){
-		$defered[] = $cal;
-	}
-	
-	function _get_deferreds(){
-		return $this->defered;
-	}
-	
-	function _get_session(){
-		return $this->session;
-	}
+// require post processing
+if($routes){
+    $halka_routes = array_merge($halka_routes, $routes);
+}
+unset($routes);
+
+if($settings){
+    $halka_settings = array_merge($halka_settings, $settings);
+}
+unset($settings);
+
+// set base url & current url
+if(isset($halka_settings['base_url'])){
+    define('HALKA_BASE_URL', halka_trim_url($halka_settings['base_url']));
+}else{
+    define('HALKA_BASE_URL', halka_trim_url('/'));
 }
 
-class View{
+define('HALKA_CURRENT_URL', halka_trim_url($_SERVER['REQUEST_URI']));
+
+
+
+class HalkaRequest{
+    public $route_params = [];
+    private $session = [];
+    private $defered = [];
+    function __construct($route_params){
+        $this->route_params = $route_params;
+    }
+
+    function set_session($key, $value){
+        $this->session[$key] = $value;
+    }
+
+    function defer($cal){
+        $defered[] = $cal;
+    }
+
+    function _get_deferreds(){
+        return $this->defered;
+    }
+
+    function _get_session(){
+        return $this->session;
+    }
+}
+
+class_alias('HalkaRequest', 'Request');
+
+class HalkaResponse{
+
+}
+class_alias('HalkaResponse', 'Response');
+
+
+class HalkaView{
 	protected $request;
 	function __construct($request){
 		$this->request = $request;
@@ -227,43 +161,349 @@ class View{
 	}
 }
 
-$fun_pars = get_view_fun();
-$fun = $fun_pars[0];
-$params = $fun_pars[1];
+class_alias('HalkaView', 'View');
 
-if(function_exists($fun) || class_exists($fun)){
-	ob_start(null, 0, PHP_OUTPUT_HANDLER_CLEANABLE);
-	$req = new Request($params);
-	
-	// try: to catch non-publicly showable errors
-	if(function_exists($fun)){
-		$fun($req);
-	}else{
-		$cls = $fun;
-		if( !is_subclass_of($cls, 'View') ){
-			die("View class must be a subclass of View");
-		}
-		$view_obj = new $cls($req);
-		$method = strtolower($_SERVER['REQUEST_METHOD']); 
-		if(!method_exists($view_obj, $method)){
-			call_user_func([$view_obj, '_method_handler_missing'], strtoupper($method));
-		}else{
-			call_user_func([$view_obj, $method]);
-		}
-	}
-	$buffer_contents = ob_get_contents();
-	ob_clean();
-	ob_end_clean();
-	// do some middleware stuffs.
-	// process the session & header stuffs
-	echo $buffer_contents;
-	// execute deferreds 
-	$deferreds = $req->_get_deferreds();
-	foreach($deferreds as $defer){
-		$defer();
-	}
-	
-	// catch: the errors and process.
-}else{
-	echo "View function called $fun does not exist.";
+
+
+// Url
+class HalkaURI{
+    private $components=[];
+    function __construct($uri) {
+        $uri = halka_trim_url($uri);
+        $this->components = explode('/', $uri);
+    }
+
+    function length(){
+        return  count($this->components);
+    }
+
+    function get_components(){
+        return $this->components;
+    }
 }
+
+// Route
+
+define('ROUTE_COMP_VALUE_IDX', 0);
+define('ROUTE_COMP_TYPE_IDX', 1);
+define('ROUTE_NAME_IDX', 2);
+
+define('ROUTE_START_IDX', 3);
+define('ROUTE_REGEX_IDX', 4);
+define('ROUTE_END_IDX', 5);
+
+define('ROUTE_COMP_TYPE_COLON', 10);
+define('ROUTE_COMP_TYPE_REGEX', 11);
+define('ROUTE_COMP_TYPE_STRING', 12);
+
+
+class HalkaRoute{
+    private $structured_components = [];
+    private $components = [];
+    private $param_name_2_comp_idx = [];
+
+    private static $colon_pat = '/^:(?P<name>[a-zA-Z0-9]+)$/';
+    private static $re_pat = '/^(?P<start>.+?)?(?:{(?P<name>[a-zA-Z0-9]+):(?P<regex>[^}]+)})?(?P<end>.*?)$/';
+
+    private function parse($pattern){
+        $pat_uri_parts = to_uri_parts($pattern);
+        for($i = 0; $i < count($pat_uri_parts); $i++) {
+            $pat_part = $pat_uri_parts[$i];
+            $this->components[] = $pat_part;
+            if (preg_match(static::$colon_pat, $pat_part, $matches)){
+                $name = $matches['name'];
+                $this->structured_components[$i] = [
+                    null,
+                    ROUTE_COMP_TYPE_COLON,
+                    $name
+                ];
+                $this->param_name_2_comp_idx[$name] = $i;
+            }
+            elseif ($re_match_res = preg_match(static::$re_pat, $pat_part, $matches)) {
+                $start = $matches['start'];
+                $name = $matches['name'];
+                $regex = $matches['regex'];
+                $end = $matches['end'];
+
+                $this->structured_components[$i] = [
+                    null,
+                    ROUTE_COMP_TYPE_REGEX,
+                    $name,
+
+                    $start,
+                    $regex,
+                    $end
+                ];
+                $this->param_name_2_comp_idx[$name] = $i;
+            }else{
+                // they are ordinary url components.
+                $this->structured_components[$i] = [
+                    $pat_part,
+                    ROUTE_COMP_TYPE_STRING,
+                ];
+            }
+        }
+    }
+
+    function __construct($route_str) {
+        $this->parse($route_str);
+    }
+
+    function make_url($params=[]){
+        if(sort(array_keys($params)) != sort(array_keys($this->param_name_2_comp_idx))){
+            /*
+             * This test also covers: count($this->param_name_2_comp_idx) !== count($params)
+             */
+            throw new Exception('Number of parameters needed for url construction and the number of provided parameters are not equal.');
+        }
+
+        if(count($this->param_name_2_comp_idx) == 0){
+            return join('/', $this->components);
+        }else{
+            $new_url_comps = [];
+            $struct_comp_s = $this->structured_components;
+            foreach ($struct_comp_s as $struct_comp){
+                if      ( $struct_comp[ROUTE_COMP_TYPE_IDX] === ROUTE_COMP_TYPE_STRING){
+                    $comp_value = $struct_comp[ROUTE_COMP_VALUE_IDX];
+                    $new_url_comps[] = $comp_value;
+                }elseif ( $struct_comp[ROUTE_COMP_TYPE_IDX] === ROUTE_COMP_TYPE_COLON){
+                    $comp_value = $params[$struct_comp[ROUTE_NAME_IDX]];
+                    $new_url_comps[] = $comp_value;
+                }else{  // regex
+                    $start = $struct_comp[ROUTE_START_IDX];
+                    $name = $struct_comp[ROUTE_NAME_IDX];
+                    $regex = $struct_comp[ROUTE_REGEX_IDX];
+                    $end = $struct_comp[ROUTE_END_IDX];
+
+                    $param_value = $params[$name];
+
+                    if(!preg_match('/^' . $regex .'$/', $param_value)){
+                        throw new Exception('Provided parameter value did not match with regex pattern in the route');
+                    }
+
+                    $comp_value = $start . $param_value . $end;
+                    $new_url_comps[] = $comp_value;
+                }
+            }
+        }
+        return join('/', $new_url_comps);
+    }
+
+    function matches_url(HalkaURI $url){
+        $url_comps = $url->get_components();
+        $route_comps = $this->components;
+
+        if(count($url_comps) !== count($route_comps)){
+            return false;
+        }
+        elseif(count($this->param_name_2_comp_idx) === 0){
+            if ($url_comps == $route_comps){
+                return true;
+            }else{
+                return false;
+            }
+        }else{
+            $matched = true;
+            $route_struct_comps = $this->structured_components;
+
+            for($i = 0; $i < count($url_comps); $i++){
+                $url_comp = $url_comps[$i];
+                $route_struct_comp = $route_struct_comps[$i];
+
+                if($route_struct_comp[ROUTE_COMP_TYPE_IDX] === ROUTE_COMP_TYPE_STRING){
+                    if($url_comp != $route_struct_comp[ROUTE_COMP_VALUE_IDX]){
+                        $matched = false;
+                        break;
+                    }
+                }elseif ( $route_struct_comp[ROUTE_COMP_TYPE_IDX] === ROUTE_COMP_TYPE_COLON){
+                    continue;
+                }else{
+                    $start = $route_struct_comp[ROUTE_START_IDX];
+                    $name = $route_struct_comp[ROUTE_NAME_IDX];
+                    $regex = $route_struct_comp[ROUTE_REGEX_IDX];
+                    $end = $route_struct_comp[ROUTE_END_IDX];
+
+                    if(starts_with($url_comp, $start) && ends_with($url_comp, $end)){
+                        $url_comp_mid = substr($url_comp, strlen($start) - 1, strlen($url_comp) - strlen($start) - strlen($end));
+                        if(preg_match('/^'. $regex . '$/', $url_comp_mid) !== 0){
+                            continue;
+                        }else{
+                            $matched = false;
+                            break;
+                        }
+                    }else{
+                        $matched = false;
+                        break;
+                    }
+                }
+
+            }
+            return $matched;
+        }
+    }
+
+    function get_components(){
+        return $this->components;
+    }
+
+    function get_structured_components(){
+        return $this->structured_components;
+    }
+
+    function length(){
+        return  count($this->components);
+    }
+}
+
+// halka default views.
+
+
+function halka_view_forbidden(HalkaRequest $r){
+
+    echo "You have entered into area 51 - don't access php files directly";
+}
+
+function halka_view404(HalkaRequest $r){
+
+    echo "404 not found - u have entered wrong url";
+}
+// Router
+
+class HalkaRouter{
+    /**
+     * Routes are not lazily parsed. If this causes significant perfomace penalty I will make it lazy later.
+     * For many routes with a lot of regular expression patterns this may cause noticeable performance issue.
+     */
+
+    private $routes = [];
+    private $route_name_2_route_idx = [];
+
+    private function parse_routes($routes){
+        $idx = -1;
+        foreach ($routes as $route_str => $route_config){
+            $idx++;
+            $route_obj = new HalkaRoute($route_str);
+            $route_name = null;
+            $viewer = $route_config;
+            if(is_string($route_config)){
+            }elseif (is_callable($route_config)){
+            }elseif(is_array($route_config)){
+                if(count($route_config) === 0){
+                    throw new Exception('Route value must not be an empty array');
+                }
+                $viewer = $route_config[0];
+                if(count($route_config) > 1){
+                    $route_name = $route_config[1];
+                }
+            }
+
+            $this->$routes[] = [
+                'route' => $route_obj,
+                'viewer' => $viewer
+            ];
+
+            if($route_name){
+                $this->route_name_2_route_idx[$route_name] = $idx;
+            }
+        }
+    }
+
+    function __construct($routes) {
+        $this->parse_routes($routes);
+    }
+
+    function make_url($route_name, $params=[]){
+        $route = $this->routes[$this->route_name_2_route_idx[$route_name]]['route'];
+        return $route->make_url($params);
+    }
+
+    private function get_viewer($uri){
+        $base_match = substr($uri, 0, strlen(HALKA_BASE_URL));
+        if($base_match === HALKA_BASE_URL && $base_match !== ''){
+            $uri = substr($uri, strlen($base_match));
+            $uri = ltrim($uri, "/");
+        }
+
+        $indexphp_match = substr($uri, 0, strlen(HALKA_FRONTSCRIPT)); // eg. index.php
+        if($indexphp_match === HALKA_FRONTSCRIPT && $indexphp_match !== ''){
+            $uri = substr($uri, strlen($indexphp_match));
+            $uri = ltrim($uri, "/");
+        }
+
+        $uri_parts = to_uri_parts($uri);
+
+        $uri_last_part = $uri_parts[count($uri_parts) - 1];
+        if(!function_exists('view_404') || !class_exists('View404')){
+            $viewer = 'halka_view404';
+        }else{
+            if(function_exists('view_404')){
+                $viewer = 'view404';
+            }else{
+                $viewer = 'View404';
+            }
+        }
+
+        $ends_with = substr($uri_last_part, -4, 4);
+        if($ends_with === ".php"){ // assuming that .php will come in lowercase
+            if(!function_exists('view_forbidden') || !class_exists('ViewForbidden')){
+                $viewer = 'halka_view_forbidden';
+            }else{
+                if(function_exists('view_forbidden')){
+                    $viewer = 'view_forbidden';
+                }else{
+                    $viewer = 'ViewForbidden';
+                }
+            }
+        }
+
+        return [$viewer, []];
+    }
+
+    function exec_viewer($uri){
+        // start request processing.
+
+        $fun_pars = $this->get_viewer($uri);
+        $fun = $fun_pars[0];
+        $params = $fun_pars[1];
+
+        if(function_exists($fun) || class_exists($fun)){
+            ob_start(null, 0, PHP_OUTPUT_HANDLER_CLEANABLE);
+            $req = new HalkaRequest($params);
+
+            // try: to catch non-publicly showable errors
+            if(function_exists($fun)){
+                $fun($req);
+            }else{
+                $cls = $fun;
+                if( !is_subclass_of($cls, 'View') ){
+                    die("View class must be a subclass of View");
+                }
+                $view_obj = new $cls($req);
+                $method = strtolower($_SERVER['REQUEST_METHOD']);
+                if(!method_exists($view_obj, $method)){
+                    call_user_func([$view_obj, '_method_handler_missing'], strtoupper($method));
+                }else{
+                    call_user_func([$view_obj, $method]);
+                }
+            }
+            $buffer_contents = ob_get_contents();
+            ob_clean();
+            ob_end_clean();
+            // do some middleware stuffs.
+            // process the session & header stuffs
+            echo $buffer_contents;
+            // execute deferreds
+            $deferreds = $req->_get_deferreds();
+            foreach($deferreds as $defer){
+                $defer();
+            }
+
+            // catch: the errors and process.
+        }else{
+            echo "View function called $fun does not exist.";
+        }
+    }
+}
+class_alias('HalkaRouter', 'Router');
+
+$_router = new HalkaRouter($halka_routes);
