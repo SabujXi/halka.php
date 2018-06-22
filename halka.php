@@ -36,8 +36,9 @@ function halka_require_if_exists($fn){
 
 // util functions
 function halka_get_view_file($name){
-    return HALKA_VIEWS_DIR . '/$name.php';
+    return HALKA_VIEWS_DIR . "/$name.php";
 }
+
 
 function halka_trim_url($url){
     return trim($url, '/');
@@ -203,14 +204,14 @@ class HalkaRoute{
     private $param_name_2_comp_idx = [];
 
     private static $colon_pat = '/^:(?P<name>[a-zA-Z0-9]+)$/';
-    private static $re_pat = '/^(?P<start>.+?)?(?:{(?P<name>[a-zA-Z0-9]+):(?P<regex>[^}]+)})?(?P<end>.*?)$/';
+    private static $re_pat = '/^(?P<start>[^{]*)?(?:{(?P<name>[a-zA-Z0-9]+):(?P<regex>[^}]+)})(?P<end>.*)?$/';
 
     private function parse($pattern){
         $pat_uri_parts = to_uri_parts($pattern);
         for($i = 0; $i < count($pat_uri_parts); $i++) {
             $pat_part = $pat_uri_parts[$i];
             $this->components[] = $pat_part;
-            if (preg_match(static::$colon_pat, $pat_part, $matches)){
+            if (preg_match(static::$colon_pat, $pat_part, $matches) !== 0){
                 $name = $matches['name'];
                 $this->structured_components[$i] = [
                     null,
@@ -219,7 +220,7 @@ class HalkaRoute{
                 ];
                 $this->param_name_2_comp_idx[$name] = $i;
             }
-            elseif ($re_match_res = preg_match(static::$re_pat, $pat_part, $matches)) {
+            elseif (preg_match(static::$re_pat, $pat_part, $matches) !== 0) {
                 $start = $matches['start'];
                 $name = $matches['name'];
                 $regex = $matches['regex'];
@@ -229,7 +230,6 @@ class HalkaRoute{
                     null,
                     ROUTE_COMP_TYPE_REGEX,
                     $name,
-
                     $start,
                     $regex,
                     $end
@@ -289,14 +289,17 @@ class HalkaRoute{
         return join('/', $new_url_comps);
     }
 
+    function has_params(){
+        return count($this->param_name_2_comp_idx) > 0 ? true : false;
+    }
+
     function matches_url(HalkaURI $url){
         $url_comps = $url->get_components();
         $route_comps = $this->components;
 
-        if(count($url_comps) !== count($route_comps)){
+        if($this->length() !== $url->length()){
             return false;
-        }
-        elseif(count($this->param_name_2_comp_idx) === 0){
+        }elseif(!$this->has_params()){
             if ($url_comps == $route_comps){
                 return true;
             }else{
@@ -304,33 +307,42 @@ class HalkaRoute{
             }
         }else{
             $matched = true;
-            $route_struct_comps = $this->structured_components;
 
-            for($i = 0; $i < count($url_comps); $i++){
+            $route_struct_comp_s = $this->structured_components;
+            $_no_of_comps = count($url_comps);
+            for($i = 0; $i < $_no_of_comps; $i++){
                 $url_comp = $url_comps[$i];
-                $route_struct_comp = $route_struct_comps[$i];
+                $route_struct_comp = $route_struct_comp_s[$i];
 
                 if($route_struct_comp[ROUTE_COMP_TYPE_IDX] === ROUTE_COMP_TYPE_STRING){
                     if($url_comp != $route_struct_comp[ROUTE_COMP_VALUE_IDX]){
                         $matched = false;
                         break;
-                    }
-                }elseif ( $route_struct_comp[ROUTE_COMP_TYPE_IDX] === ROUTE_COMP_TYPE_COLON){
-                    continue;
-                }else{
+                    }else continue;
+                }elseif($route_struct_comp[ROUTE_COMP_TYPE_IDX] === ROUTE_COMP_TYPE_COLON) continue;
+                else{
                     $start = $route_struct_comp[ROUTE_START_IDX];
-                    $name = $route_struct_comp[ROUTE_NAME_IDX];
+                    // $name = $route_struct_comp[ROUTE_NAME_IDX];
                     $regex = $route_struct_comp[ROUTE_REGEX_IDX];
                     $end = $route_struct_comp[ROUTE_END_IDX];
 
-                    if(starts_with($url_comp, $start) && ends_with($url_comp, $end)){
-                        $url_comp_mid = substr($url_comp, strlen($start) - 1, strlen($url_comp) - strlen($start) - strlen($end));
-                        if(preg_match('/^'. $regex . '$/', $url_comp_mid) !== 0){
-                            continue;
-                        }else{
+
+                    if($start !== ''){
+                        if(!starts_with($url_comp, $start)){
                             $matched = false;
                             break;
                         }
+                    }
+                    if ($end !== ''){
+                        if(!ends_with($url_comp, $end)){
+                            $matched = false;
+                            break;
+                        }
+                    }
+
+                    $url_comp_mid = substr($url_comp, strlen($start) === 0 ? 0 : strlen($start), strlen($url_comp) - strlen($start) - strlen($end));
+                    if(preg_match('/^'. $regex . '$/', $url_comp_mid) !== 0){
+                        continue;
                     }else{
                         $matched = false;
                         break;
@@ -397,7 +409,8 @@ class HalkaRouter{
                 }
             }
 
-            $this->$routes[] = [
+            $this->routes[] = [
+
                 'route' => $route_obj,
                 'viewer' => $viewer
             ];
@@ -412,47 +425,55 @@ class HalkaRouter{
         $this->parse_routes($routes);
     }
 
+    function get_routes(){
+        return $this->routes;
+    }
+
     function make_url($route_name, $params=[]){
         $route = $this->routes[$this->route_name_2_route_idx[$route_name]]['route'];
         return $route->make_url($params);
     }
 
     private function get_viewer($uri){
-        $base_match = substr($uri, 0, strlen(HALKA_BASE_URL));
-        if($base_match === HALKA_BASE_URL && $base_match !== ''){
-            $uri = substr($uri, strlen($base_match));
-            $uri = ltrim($uri, "/");
+        if(starts_with($uri, HALKA_BASE_URL)){
+            $uri = substr($uri, strlen(HALKA_BASE_URL));
+            $uri = halka_trim_url($uri);
         }
-
-        $indexphp_match = substr($uri, 0, strlen(HALKA_FRONTSCRIPT)); // eg. index.php
-        if($indexphp_match === HALKA_FRONTSCRIPT && $indexphp_match !== ''){
-            $uri = substr($uri, strlen($indexphp_match));
-            $uri = ltrim($uri, "/");
+        if(starts_with($uri, HALKA_FRONTSCRIPT)){  // eg. index.php
+            $uri = substr($uri, strlen(HALKA_FRONTSCRIPT));
+            $uri = halka_trim_url($uri);
         }
 
         $uri_parts = to_uri_parts($uri);
-
         $uri_last_part = $uri_parts[count($uri_parts) - 1];
-        if(!function_exists('view_404') || !class_exists('View404')){
-            $viewer = 'halka_view404';
-        }else{
+
+        if(function_exists('view_404') || class_exists('View404')){
             if(function_exists('view_404')){
                 $viewer = 'view404';
             }else{
                 $viewer = 'View404';
             }
+        }else{
+            $viewer = 'halka_view404';
         }
 
-        $ends_with = substr($uri_last_part, -4, 4);
-        if($ends_with === ".php"){ // assuming that .php will come in lowercase
-            if(!function_exists('view_forbidden') || !class_exists('ViewForbidden')){
-                $viewer = 'halka_view_forbidden';
-            }else{
+        if(ends_with($uri_last_part, ".php")){ // assuming that .php will come in lowercase
+            if(function_exists('view_forbidden') || class_exists('ViewForbidden')){
                 if(function_exists('view_forbidden')){
                     $viewer = 'view_forbidden';
                 }else{
                     $viewer = 'ViewForbidden';
                 }
+            }else{
+                $viewer = 'halka_view_forbidden';
+            }
+        }
+
+        // now find the defined viewer
+        $uri_obj = new HalkaURI($uri);
+        foreach ($this->routes as $route){
+            if(($route['route'])->matches_url($uri_obj)){
+                $viewer = $route['viewer'];
             }
         }
 
@@ -460,6 +481,7 @@ class HalkaRouter{
     }
 
     function exec_viewer($uri){
+        $uri = halka_trim_url($uri);
         // start request processing.
 
         $fun_pars = $this->get_viewer($uri);
@@ -488,7 +510,7 @@ class HalkaRouter{
             }
             $buffer_contents = ob_get_contents();
             ob_clean();
-            ob_end_clean();
+            //ob_end_clean();
             // do some middleware stuffs.
             // process the session & header stuffs
             echo $buffer_contents;
@@ -507,3 +529,4 @@ class HalkaRouter{
 class_alias('HalkaRouter', 'Router');
 
 $_router = new HalkaRouter($halka_routes);
+$_router->exec_viewer(HALKA_CURRENT_URL);

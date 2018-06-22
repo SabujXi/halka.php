@@ -6,7 +6,7 @@ function view_index(Request $r){
 }
 
 function view1fun(Request $r){
-	$fn = get_view_file("view1");
+	$fn = halka_get_view_file("view1");
 	
 	include $fn;
 	
@@ -14,12 +14,12 @@ function view1fun(Request $r){
 
 
 function view2fun(Request $r){
-	$fn = get_view_file("view2");
+	$fn = halka_get_view_file("view2");
 	$name = "Somebody";
 	include $fn;
 	
 }
 function inputfunc(Request $r){
-	$fn = get_view_file("view3");
+	$fn = halka_get_view_file("view3");
 	include $fn;
 }

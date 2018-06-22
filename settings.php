@@ -1,5 +1,5 @@
 <?php
 
 return [
-	'base_url' => '/'
+	'base_url' => 'php-pos/halka'
 ];
