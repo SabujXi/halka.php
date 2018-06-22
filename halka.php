@@ -120,10 +120,22 @@ define('HALKA_CURRENT_URL', halka_trim_url($_SERVER['REQUEST_URI']));
 
 class HalkaRequest{
     public $route_params = [];
-    private $session = [];
-    private $defered = [];
     function __construct($route_params){
         $this->route_params = $route_params;
+    }
+
+    function get_route_params(){
+        return $this->route_params;
+    }
+}
+
+class_alias('HalkaRequest', 'Request');
+
+
+class HalkaResponse{
+    private $session = [];
+    private $defered = [];
+    function __construct(){
     }
 
     function set_session($key, $value){
@@ -142,22 +154,15 @@ class HalkaRequest{
         return $this->session;
     }
 }
-
-class_alias('HalkaRequest', 'Request');
-
-class HalkaResponse{
-
-}
 class_alias('HalkaResponse', 'Response');
 
 
 class HalkaView{
 	protected $request;
-	function __construct($request){
-		$this->request = $request;
+	function __construct(){
 	}
 	
-	function _method_handler_missing($method){
+	function _method_handler_missing($method, $req, $resp){
 		die("Method $method: hendler missing");
 	}
 }
@@ -169,6 +174,8 @@ class_alias('HalkaView', 'View');
 // Url
 class HalkaURI{
     private $components=[];
+    private $params = [];
+    private $params_set = false;
     function __construct($uri) {
         $uri = halka_trim_url($uri);
         $this->components = explode('/', $uri);
@@ -180,6 +187,18 @@ class HalkaURI{
 
     function get_components(){
         return $this->components;
+    }
+
+    function get_params(){
+        return $this->params;
+    }
+
+    function set_params($params){
+        if($this->params_set){
+            throw new Exception('Params cannot be re-set once set');
+        }
+        $this->params = $params;
+        $this->params_set = true;
     }
 }
 
@@ -297,10 +316,13 @@ class HalkaRoute{
         $url_comps = $url->get_components();
         $route_comps = $this->components;
 
+        $params=[];
+
         if($this->length() !== $url->length()){
             return false;
         }elseif(!$this->has_params()){
             if ($url_comps == $route_comps){
+                $url->set_params($params);
                 return true;
             }else{
                 return false;
@@ -319,10 +341,14 @@ class HalkaRoute{
                         $matched = false;
                         break;
                     }else continue;
-                }elseif($route_struct_comp[ROUTE_COMP_TYPE_IDX] === ROUTE_COMP_TYPE_COLON) continue;
+                }elseif($route_struct_comp[ROUTE_COMP_TYPE_IDX] === ROUTE_COMP_TYPE_COLON) {
+                    $name = $route_struct_comp[ROUTE_NAME_IDX];
+                    $params[$name] = $url_comp;
+                    continue;
+                }
                 else{
                     $start = $route_struct_comp[ROUTE_START_IDX];
-                    // $name = $route_struct_comp[ROUTE_NAME_IDX];
+                     $name = $route_struct_comp[ROUTE_NAME_IDX];
                     $regex = $route_struct_comp[ROUTE_REGEX_IDX];
                     $end = $route_struct_comp[ROUTE_END_IDX];
 
@@ -342,6 +368,7 @@ class HalkaRoute{
 
                     $url_comp_mid = substr($url_comp, strlen($start) === 0 ? 0 : strlen($start), strlen($url_comp) - strlen($start) - strlen($end));
                     if(preg_match('/^'. $regex . '$/', $url_comp_mid) !== 0){
+                        $params[$name] = $url_comp_mid;
                         continue;
                     }else{
                         $matched = false;
@@ -349,6 +376,9 @@ class HalkaRoute{
                     }
                 }
 
+            }
+            if ($matched){
+                $url->set_params($params);
             }
             return $matched;
         }
@@ -477,35 +507,36 @@ class HalkaRouter{
             }
         }
 
-        return [$viewer, []];
+        return [$viewer, $uri_obj->get_params()];
     }
 
     function exec_viewer($uri){
         $uri = halka_trim_url($uri);
         // start request processing.
 
-        $fun_pars = $this->get_viewer($uri);
-        $fun = $fun_pars[0];
-        $params = $fun_pars[1];
+        $viewer_n_params = $this->get_viewer($uri);
+        $viewer = $viewer_n_params[0];
+        $route_params = $viewer_n_params[1];
 
-        if(function_exists($fun) || class_exists($fun)){
+        if(function_exists($viewer) || class_exists($viewer)){
             ob_start(null, 0, PHP_OUTPUT_HANDLER_CLEANABLE);
-            $req = new HalkaRequest($params);
+            $req = new HalkaRequest($route_params);
+            $resp = new HalkaResponse();
 
             // try: to catch non-publicly showable errors
-            if(function_exists($fun)){
-                $fun($req);
+            if(function_exists($viewer)){
+                $viewer($req, $resp);
             }else{
-                $cls = $fun;
-                if( !is_subclass_of($cls, 'View') ){
+                $cls = $viewer;
+                if( !is_subclass_of($cls, 'HalkaView') ){
                     die("View class must be a subclass of View");
                 }
-                $view_obj = new $cls($req);
+                $view_obj = new $cls();
                 $method = strtolower($_SERVER['REQUEST_METHOD']);
                 if(!method_exists($view_obj, $method)){
-                    call_user_func([$view_obj, '_method_handler_missing'], strtoupper($method));
+                    call_user_func_array([$view_obj, '_method_handler_missing'], [strtoupper($method), $req, $resp]);
                 }else{
-                    call_user_func([$view_obj, $method]);
+                    call_user_func_array([$view_obj, $method], [$req, $resp]);
                 }
             }
             $buffer_contents = ob_get_contents();
@@ -515,14 +546,14 @@ class HalkaRouter{
             // process the session & header stuffs
             echo $buffer_contents;
             // execute deferreds
-            $deferreds = $req->_get_deferreds();
+            $deferreds = $resp->_get_deferreds();
             foreach($deferreds as $defer){
                 $defer();
             }
 
             // catch: the errors and process.
         }else{
-            echo "View function called $fun does not exist.";
+            die("View function called $viewer does not exist.");
         }
     }
 }
