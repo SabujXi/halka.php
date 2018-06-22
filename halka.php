@@ -64,16 +64,6 @@ function halka_load_view($name, $ctx=[], $file_ext=''){
 }
 
 
-function asset_url($name){
-    return HALKA_ASSETS_DIR . '/' . $name;
-}
-
-function load_asset_url($name){
-    $url = asset_url($name);
-    echo $url;
-    return $url;
-}
-
 function load_asset_content($name){
     $fn = HALKA_ASSETS_DIR . '/' . $name;
     $cnt = file_get_contents($fn);
@@ -154,6 +144,12 @@ if(isset($halka_settings['base_url'])){
     define('HALKA_BASE_URL', halka_trim_url($halka_settings['base_url']));
 }else{
     define('HALKA_BASE_URL', halka_trim_url('/'));
+}
+
+if(isset($halka_settings['clean_url'])){
+    define('HALKA_CLEAN_URL', $halka_settings['clean_url']);
+}else{
+    define('HALKA_CLEAN_URL', false);
 }
 
 define('HALKA_CURRENT_URL', halka_trim_url($_SERVER['REQUEST_URI']));
@@ -347,7 +343,11 @@ class HalkaRoute{
                 }
             }
         }
-        return join('/', $new_url_comps);
+        $new_url = join('/', $new_url_comps);
+        if(!HALKA_CLEAN_URL){
+            $new_url = HALKA_BASE_URL . '/' . HALKA_FRONTSCRIPT . '/' . $new_url;
+        }
+        return $new_url;
     }
 
     function has_params(){
@@ -610,6 +610,17 @@ function get_url($route_name, $params=[]){
 
 function load_url($route_name, $params=[]){
     $url = get_url($route_name, $params);
+    echo $url;
+    return $url;
+}
+
+function asset_url($name){
+    // no need of thinking about clean url here as it is not dynamic content.
+    return '/' . HALKA_BASE_URL . '/' . $name;
+}
+
+function load_asset_url($name){
+    $url = asset_url($name);
     echo $url;
     return $url;
 }
