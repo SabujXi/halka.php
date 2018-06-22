@@ -1,15 +1,11 @@
 <?php
 
 function view_index($req, $resp){
-	var_dump($req);
-    var_dump($resp);
 	echo "this is view index";
 }
 
 function view1fun(HalkaRequest $req, HalkaResponse $resp){
-	$fn = halka_get_view_file("view1");
-	
-	include $fn;
+	halka_load_view('view1');
 	
 }
 

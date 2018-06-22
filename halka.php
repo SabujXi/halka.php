@@ -38,7 +38,7 @@ function halka_require_if_exists($fn){
 
 // util functions
 function halka_get_view_file($name, $file_ext=''){
-    if($file_ext !== ''){
+    if($file_ext === ''){
         $fn_php = HALKA_VIEWS_DIR . "/$name.php";
         $fn_html = HALKA_VIEWS_DIR . "/$name.html";
         if(file_exists($fn_php)){
@@ -59,7 +59,7 @@ function halka_get_view_file($name, $file_ext=''){
 
 function halka_load_view($name, $ctx=[], $file_ext=''){
     $view_file = halka_get_view_file($name, $file_ext);
-    var_export($ctx);
+    extract($ctx);
     require $view_file;
 }
 
