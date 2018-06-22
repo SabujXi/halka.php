@@ -560,4 +560,16 @@ class HalkaRouter{
 class_alias('HalkaRouter', 'Router');
 
 $_router = new HalkaRouter($halka_routes);
+
+function get_url($route_name, $params=[]){
+    global $_router;
+    return $_router->make_url($route_name, $params);
+}
+
+function load_url($route_name, $params=[]){
+    $url = get_url($route_name, $params);
+    echo $url;
+    return $url;
+}
+
 $_router->exec_viewer(HALKA_CURRENT_URL);
