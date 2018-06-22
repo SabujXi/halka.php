@@ -21,6 +21,8 @@ if (!defined('HALKA_FRONTSCRIPT')){
 define('HALKA_VIEWS_DIR', HALKA_BASEDIR . '/' . 'views');
 define('HALKA_VIEWERS_DIR', HALKA_BASEDIR . '/' . 'viewers');
 
+define('HALKA_ASSETS_DIR', HALKA_BASEDIR . 'assets');
+
 $halka_routes = [];
 $halka_settings = [];
 
@@ -35,8 +37,48 @@ function halka_require_if_exists($fn){
 
 
 // util functions
-function halka_get_view_file($name){
-    return HALKA_VIEWS_DIR . "/$name.php";
+function halka_get_view_file($name, $file_ext=''){
+    if($file_ext !== ''){
+        $fn_php = HALKA_VIEWS_DIR . "/$name.php";
+        $fn_html = HALKA_VIEWS_DIR . "/$name.html";
+        if(file_exists($fn_php)){
+            return $fn_php;
+        }elseif(file_exists($fn_html)){
+            return $fn_html;
+        }else{
+            throw new Exception("View $name not found");
+        }
+    }else{
+        $fn_any = HALKA_VIEWS_DIR . "/$name.$file_ext";
+        if(!file_exists($fn_any)){
+            throw new Exception("View $name with ext $file_ext not found");
+        }
+        return $fn_any;
+    }
+}
+
+function halka_load_view($name, $ctx=[], $file_ext=''){
+    $view_file = halka_get_view_file($name, $file_ext);
+    var_export($ctx);
+    require $view_file;
+}
+
+
+function asset_url($name){
+    return HALKA_ASSETS_DIR . '/' . $name;
+}
+
+function load_asset_url($name){
+    $url = asset_url($name);
+    echo $url;
+    return $url;
+}
+
+function load_asset_content($name){
+    $fn = HALKA_ASSETS_DIR . '/' . $name;
+    $cnt = file_get_contents($fn);
+    echo $cnt;
+    return $cnt;
 }
 
 
