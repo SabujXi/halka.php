@@ -10,13 +10,13 @@ function view1fun(HalkaRequest $req, HalkaResponse $resp){
 }
 
 function view2fun(HalkaRequest $req, HalkaResponse $resp){
-	$fn = halka_get_view_file("view2");
 	$name = "Somebody";
-	include $fn;
+    halka_load_view('view2', $ctx=[
+        'name' => $name
+    ]);
 	
 }
 
 function inputfunc(HalkaRequest $req, HalkaResponse $resp){
-	$fn = halka_get_view_file("view3");
-	include $fn;
+	halka_load_view("view3");
 }

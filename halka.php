@@ -59,6 +59,7 @@ function halka_get_view_file($name, $file_ext=''){
 
 function halka_load_view($name, $ctx=[], $file_ext=''){
     $view_file = halka_get_view_file($name, $file_ext);
+    unset($name);
     extract($ctx);
     require $view_file;
 }
@@ -172,16 +173,34 @@ class_alias('HalkaRequest', 'Request');
 
 class HalkaResponse{
     private $session = [];
+    private $headers = [];
     private $defered = [];
-    function __construct(){
+    private $response_code = null;
+
+    function __construct(){}
+
+    function session_add($key, $value){
+        $this->session[$key] = $value;
     }
 
-    function set_session($key, $value){
-        $this->session[$key] = $value;
+    function session_delete($key){
+
+    }
+
+    function session_destroy(){
+
     }
 
     function defer($cal){
         $defered[] = $cal;
+    }
+
+    function set_header($key, $value){
+        $this->headers[$key] = $value;
+    }
+
+    function set_response_code($code){
+        $this->response_code = $code;
     }
 
     function _get_deferreds(){
@@ -190,6 +209,14 @@ class HalkaResponse{
 
     function _get_session(){
         return $this->session;
+    }
+
+    function _get_headers(){
+        return $this->headers;
+    }
+
+    function _get_response_code(){
+        return $this->response_code;
     }
 }
 class_alias('HalkaResponse', 'Response');
@@ -581,12 +608,37 @@ class HalkaRouter{
                     call_user_func_array([$view_obj, $method], [$req, $resp]);
                 }
             }
+
+            // request pre-output processing
+            $code = $resp->_get_response_code();
+            if($code){
+                http_response_code($code);
+            }
+
+            $headers = $resp->_get_headers();
+            if($headers){
+                foreach ($headers as $key => $value){
+                    header("$key: $value");
+                }
+            }
+            $sessions = $resp->_get_session();
+            if($sessions){
+                // do session processing
+                //session_start();
+                // remove all session variables
+                //session_unset();
+                // destroy the session
+                //session_destroy();
+            }
+
             $buffer_contents = ob_get_contents();
             ob_clean();
-            //ob_end_clean();
+            // ob_end_clean();
             // do some middleware stuffs.
             // process the session & header stuffs
-            echo $buffer_contents;
+            if($buffer_contents !== ''){
+                echo $buffer_contents;
+            }
             // execute deferreds
             $deferreds = $resp->_get_deferreds();
             foreach($deferreds as $defer){
