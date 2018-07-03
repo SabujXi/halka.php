@@ -1,7 +1,9 @@
 <?php
 
-function view_index($req, $resp){
-	echo "this is view index";
+function view_index($req, $resp, $app){
+    //var_dump($app);
+	//echo "this is view index";
+    $app->load_view('home');
 }
 
 function view1fun(HalkaRequest $req, HalkaResponse $resp){

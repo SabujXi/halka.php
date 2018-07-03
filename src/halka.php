@@ -10,27 +10,16 @@ This framework was developed out of frustration of bulkiness of popular framewor
 */
 
 
-if (!defined('HALKA_BASEDIR')){
-    define('HALKA_BASEDIR', __DIR__);
+
+function halka_require($fn){
+	return require_once $fn;
 }
-
-if (!defined('HALKA_FRONTSCRIPT')){
-    define('HALKA_FRONTSCRIPT', basename(__FILE__));
-}
-
-define('HALKA_VIEWS_DIR', HALKA_BASEDIR . '/' . 'views');
-define('HALKA_VIEWERS_DIR', HALKA_BASEDIR . '/' . 'viewers');
-
-define('HALKA_ASSETS_DIR', HALKA_BASEDIR . 'assets');
-
-$halka_routes = [];
-$halka_settings = [];
 
 function halka_require_if_exists($fn){
     // caution: variables are not imported into global space when imported from a function.
     // works perfectly for functions and classes.
-    if(file_exists('routes.php')){
-        return require_once $fn;
+    if(file_exists($fn)){
+        return halka_require($fn);
     }
     return null;
 }
@@ -59,7 +48,13 @@ function halka_get_view_file($name, $file_ext=''){
 
 function halka_load_view($name, $ctx=[], $file_ext=''){
     $view_file = halka_get_view_file($name, $file_ext);
+    if(isset($ctx['context'])){
+        // no messing with context variable from template or view. It will be set from
+        // halka_load_view.
+        unset($ctx['context']);
+    }
     unset($name);
+	$context = $ctx;
     extract($ctx);
     require $view_file;
 }
@@ -123,38 +118,19 @@ function to_uri_parts($uri){
     return explode("/", $uri);
 }
 
-// require necessary files.
-$routes = halka_require_if_exists(HALKA_BASEDIR . '/routes.php');
-$settings = halka_require_if_exists(HALKA_BASEDIR . '/settings.php');
-halka_require_if_exists(HALKA_BASEDIR . '/viewers/functions.php');
-halka_require_if_exists(HALKA_BASEDIR . '/viewers/classes.php');  // classes can have dependency of functions required above.
-
-// require post processing
-if($routes){
-    $halka_routes = array_merge($halka_routes, $routes);
-}
-unset($routes);
-
-if($settings){
-    $halka_settings = array_merge($halka_settings, $settings);
-}
-unset($settings);
-
-// set base url & current url
-if(isset($halka_settings['base_url'])){
-    define('HALKA_BASE_URL', halka_trim_url($halka_settings['base_url']));
-}else{
-    define('HALKA_BASE_URL', halka_trim_url('/'));
+function url_without_query($url){
+	$_url_part = explode('?', $url, 2);
+	$url = $_url_part[0];
+	// var_dump($_url_part);
+	// $url = strtok($url,'?');
+	return $url;
 }
 
-if(isset($halka_settings['clean_url'])){
-    define('HALKA_CLEAN_URL', $halka_settings['clean_url']);
-}else{
-    define('HALKA_CLEAN_URL', false);
-}
 
-define('HALKA_CURRENT_URL', halka_trim_url($_SERVER['REQUEST_URI']));
+// Exceptions
 
+class DoneException extends Exception{}
+class InternalErrorException extends Exception{}
 
 
 class HalkaRequest{
@@ -168,72 +144,427 @@ class HalkaRequest{
     }
 }
 
-class_alias('HalkaRequest', 'Request');
-
 
 class HalkaResponse{
     private $session = [];
     private $headers = [];
-    private $defered = [];
     private $response_code = null;
+	
+	protected $discard_headers = false;
+	protected $discard_content = false;
+	protected $discard_session = false;
+	
+	protected $buffering_started = false;  // once set to true it must never be set to false even if when ending it.
+	protected $buffering_stopped = false;
+	
+	protected $committed = false;
+	
+	function start_buffering(){
+		if($this->buffering_started === true){
+			throw new Exception('Must not call start_buffering twice');
+		}
+		$this->buffering_started = true;
+		ob_start(null, 0, PHP_OUTPUT_HANDLER_CLEANABLE | PHP_OUTPUT_HANDLER_REMOVABLE);
+	}
+	
+	private function _stop_buffering(){
+		if ($this->buffering_started === false){
+			throw new Exception('Cannot stop buffering when it never started.');
+		}
+		
+		if($this->buffering_stopped){
+			throw new Exception('Cannot stop buffer twice');
+		}
+		$this->buffering_stopped = true;
+	}
+	
+	private	function commit(){
+		if ($this->committed === true){
+			throw new Exception('Cannot commit twice.');
+		}
+		
+		
+		
+            // request pre-output processing
+			
+			
+		
+		// send response code
+		$code = $this->_get_response_code();
+            if($code){
+                http_response_code($code);
+            }
+		$this->response_code = null;
+		
+		// add all session key and other processing.
+		$sessions = $this->_get_session();
+            if($sessions){
+                // do session processing
+                //session_start();
+                // remove all session variables
+                //session_unset();
+                // destroy the session
+                //session_destroy();
+            }
+		
+		$this->session = [];
+		
+		// add all headers key
+		$headers = $this->_get_headers();
+            if($headers){
+                foreach ($headers as $key => $value){
+                    header("$key: $value");
+                }
+            }
+		$this->headers = [];
+		
+		// turn off buffering if not off and flush content.
+		$this->_stop_buffering();
+		
+		$buffer_contents = ob_get_contents();
+            // ob_clean();
+            // ob_end_clean();
+            // do some middleware stuffs in where it goes.
+            // process the session & header stuffs: done before.
+		
+		ob_end_clean();
+		
+		$this->committed = true;
+		
+		return $buffer_contents;
+	}
+	
+	function stop_buffering(){
+		if($this->buffering_stopped !== true){
+			return $this->commit();
+		}
+		return '';
+	}
+	
+	function buffering_stopped(){
+		return $this->buffering_stopped;
+	}
+	
+	function discard_headers(){
+		// can be discarded as many times as needed.
+		$this->headers = [];
+		$this->discard_header = true;
+	}
+	
+	function discard_content(){
+		// can be discarded as many times as needed.
+		$this->discard_content = true;
+		if($this->buffering_started !== true){
+			throw new Exception('Cannot discard buffer when it never started.');
+		}
+		ob_clean();
+	}
+	
+	function discard_session(){
+		$this->session = [];
+		$this->discard_session = true;
+	}
+	
+	
+	function discard_all(){
+		$this->discard_headers();
+		$this->discard_content();
+		$this->discard_session();
+	}
 
     function __construct(){}
 
+    function done(){
+        throw new DoneException();
+    }
+
+    function response_done(){
+        return $this->done();
+    }
+
+    function stop(){
+        return $this->done();
+    }
+
     function session_add($key, $value){
+		if($this->buffering_stopped === true){
+			throw new Exception('Cannot add session in unbufferred mode');
+		}
         $this->session[$key] = $value;
     }
 
     function session_delete($key){
-
+		if($this->buffering_stopped === true){
+			throw new Exception('Cannot delete session in unbufferred mode');
+		}
+		
+		// TODO: real processing here
     }
 
     function session_destroy(){
-
-    }
-
-    function defer($cal){
-        $defered[] = $cal;
+		if($this->buffering_stopped === true){
+			throw new Exception('Cannot destroy session in unbufferred mode');
+		}
+		
+		// TODO: real processing here.
     }
 
     function set_header($key, $value){
+		if($this->buffering_stopped === true){
+			throw new Exception('Cannot set header in unbufferred mode');
+		}
+		
         $this->headers[$key] = $value;
     }
 
     function set_response_code($code){
+		if($this->buffering_stopped === true){
+			throw new Exception('Cannot set response in unbufferred mode');
+		}
+		
         $this->response_code = $code;
     }
-
-    function _get_deferreds(){
-        return $this->defered;
-    }
-
-    function _get_session(){
+	
+    private function _get_session(){
         return $this->session;
     }
 
-    function _get_headers(){
+    private function _get_headers(){
         return $this->headers;
     }
 
-    function _get_response_code(){
+    private function _get_response_code(){
         return $this->response_code;
     }
 }
-class_alias('HalkaResponse', 'Response');
 
+define('TEMPLATE_TYPE_TEXT', 'T');
+define('TEMPLATE_TYPE_SECTION', 'S');
 
-class HalkaView{
-	protected $request;
-	function __construct(){
-	}
-	
-	function _method_handler_missing($method, $req, $resp){
-		die("Method $method: hendler missing");
-	}
+class HalkaSectionTemplate{  // almost sole existance of this class is for local stack.
+    private $viewer;
+    private $view_loaded = false;
+
+    function __construct(HalkaViewer $viewer) {
+        $this->viewer = $viewer;
+    }
+    private $local_current_section = null;
+
+    final function section_declare($name){
+        $_prev_content = ob_get_contents();
+        ob_clean();
+        $this->viewer->__push_content_to_stack(null, [TEMPLATE_TYPE_TEXT, $_prev_content]);
+
+        // section declaration works in the global space - not in the local space.
+        try{
+            $this->viewer->__section_declare($name);//, $this->template_local_stack);
+        }catch (Exception $e){
+            ob_end_flush();
+            // rethrow the exception
+            throw $e;
+        }
+    }
+
+    final function section_start($name){
+        // start and end section works in local space.
+        /*
+        if(in_array($name, $this->viewer->template_sections())){
+            // ending section specific buffer
+            ob_end_flush();
+            // this check is global.
+            throw new Exception("Duplicate section $name detected.");
+        }
+        This code is not needed as now template declaration and start end are indepenednt. Error will be checked otherwise.
+        */
+        if(!is_null($this->local_current_section)){
+            // ending section specific buffer
+            ob_end_flush();
+            throw new Exception("A section with name $this->local_current_section started but never ended. You started another section with name $name. What is this, man!");
+        }
+
+        // if there is any previous content, push that to stack.
+        // content from template buffer.
+        $__prev_content = ob_get_contents();
+        // cleaning template specific buffer.
+        ob_clean();
+        $this->viewer->__push_content_to_stack(null, [TEMPLATE_TYPE_TEXT, $__prev_content]);
+        $this->local_current_section = $name;
+
+        // specific buffer for a specific section.
+        ob_start(null, 0, PHP_OUTPUT_HANDLER_CLEANABLE | PHP_OUTPUT_HANDLER_REMOVABLE | PHP_OUTPUT_HANDLER_FLUSHABLE);
+    }
+
+    final function section_end($name){
+        if($this->local_current_section !== $name){
+            // ending section specific buffer.
+            ob_end_flush();
+            throw new Exception("Current section $this->local_current_section did not end when you want to end section $name. Too err is human, fix it!");
+        }
+        // content section buffer.
+        $section_content = ob_get_contents();
+        $this->local_current_section = null;
+        // ending section specific buffer.
+        ob_end_clean();
+        $this->viewer->__add_to_section_map($name, $section_content);
+    }
+
+    final function load_view($name, $ctx=[], $file_ext=''){
+        if ($this->view_loaded === true){
+            // push any orphan content
+            $_prev_content = ob_get_contents();
+            ob_clean();
+            $this->viewer->__push_content_to_stack(null, [TEMPLATE_TYPE_TEXT, $_prev_content]);
+            // throw new Exception("Cannot be loaded twice.");
+            $template = new self($this->viewer);
+            $ctx['template'] = $template;
+            $template->load_view($name, $ctx, $file_ext);
+            return;
+        }
+        $this->view_loaded = true;
+
+        // buffering for templating.
+        ob_start(null, 0, PHP_OUTPUT_HANDLER_CLEANABLE | PHP_OUTPUT_HANDLER_REMOVABLE | PHP_OUTPUT_HANDLER_FLUSHABLE);
+
+        $ctx['template'] = $this;
+        halka_load_view($name, $ctx, $file_ext);
+        // if a section was not ended, throw here.
+        if(!is_null($this->local_current_section)){
+            ob_end_flush(); // for buffer started in section_/start/end/declare.
+            ob_end_flush(); // for buffer template buffer/this load_view function.
+            throw new Exception("A section with name $this->local_current_section never ended.");
+        }else{
+            $__end_contents = ob_get_contents();
+            $this->viewer->__push_content_to_stack(null, [TEMPLATE_TYPE_TEXT, $__end_contents]);
+        }
+        // completely clean the content as we no longer need them.
+        ob_end_clean();
+        $this->local_current_section = null;
+        $this->viewer = null;
+    }
+
+    final function load_child($name, $ctx=[], $file_ext=''){
+        $this->load_view($name, $ctx, $file_ext);
+    }
+
+    final function extend_view($name, $ctx=[], $file_ext=''){
+        $this->load_view($name, $ctx, $file_ext);
+    }
+
+    final function extend($name, $ctx=[], $file_ext=''){
+        $this->load_view($name, $ctx, $file_ext);
+    }
 }
 
-class_alias('HalkaView', 'View');
+class HalkaViewer{
+	protected $request;
+	
+	protected $truth_store = []; // context store.
 
+    private $global_template_stack = [];
+    // private $cuttent_section = null; -- it is a local stuff.
+
+    private $global_section_map = []; // this->global_section_map[$section_name] = $section_content.
+
+    private $declared_sections = [];
+	
+	function __construct(){}
+	
+	function before($req, $resp, $app){}
+	
+	function after($req, $resp, $app){}
+
+	function template_sections(){
+	    return array_keys($this->global_template_stack);  // TODO: filter out numeric index.
+    }
+	
+	final function _method_handler_missing($method, $req, $resp, $app){
+		die("Method $method: hendler missing");
+		// return false when not dying. That result will be used to determine whether after and deferred should be executed.
+	}
+	
+	final function getValue($key){
+		return $this->truth_store[$key];
+	}
+
+	final function get_context($key){
+	    return $this->getValue($key);
+    }
+	
+	final function setValue($key, $value){
+		$this->truth_store[$key] = $value;
+	}
+
+	final function set_context($key, $value){
+	    return $this->setValue($key, $value);
+    }
+
+    final function __section_declare($name){
+        if(in_array($name, $this->declared_sections)){
+            throw new Exception("Duplicate section declaration: $name");
+        }
+        /*
+        if(!array_key_exists($name, $this->global_section_map)){
+            throw new Exception("Section $name must already be populated in global section map before the declaration found in the child tree.");
+        }
+        // no, most of the time load can happen before the sections are declared. Check for error in viewer->load_view.
+        */
+
+        $this->declared_sections[] = $name;
+        // push null value to global scope to be populated later.
+        $this->global_template_stack[$name] = [TEMPLATE_TYPE_SECTION, null];
+    }
+
+    final function __add_to_section_map($name, $content){
+        $this->global_section_map[$name] = $content;
+    }
+
+    final function __push_content_to_stack($name, $content){
+        if(!is_null($name)){
+            $this->global_template_stack[$name] = $content;
+        }else{
+            $this->global_template_stack[] = $content;
+        }
+    }
+
+    final function load_view($name, $ctx=[], $file_ext=''){
+        $template = new HalkaSectionTemplate($this);
+        $template->load_view($name, $ctx, $file_ext);
+        // process the templates and output.
+
+        // error checking: unwanted section.
+        foreach ($this->global_section_map as $section_name => $section_value){
+            // a declared section can be left empty - no value provided by starting and ending section.
+            if(!array_key_exists($section_name, $this->global_template_stack)){
+                throw new Exception("$section_name was not declared in template but used.");
+            }
+            // but a section started and ended cannot be present without being declared.
+        }
+
+        foreach ($this->global_template_stack as $name => $content_array){
+            $content_type = $content_array[0];
+            $content = $content_array[1];
+            if ($content_type === TEMPLATE_TYPE_SECTION){
+                if(!is_null($content)){
+                    throw new Exception("Content in global template map must be null");
+                }
+                $content = $this->global_section_map[$name];
+                echo $content;
+            }elseif ($content_type === TEMPLATE_TYPE_TEXT){
+                echo $content;
+            }else{
+                throw new Exception('Unknown error for template processing.');
+            }
+        }
+        // reset template stack for another load.
+        $this->template_local_stack = [];
+	}
+	
+	protected final function load_views($view_names, $ctx=[], $file_ext=''){
+		foreach($view_names as $view_name){
+			$this->load_view($view_name, $ctx=$ctx, $file_ext=$file_ext);
+		}
+	}
+}
 
 
 // Url
@@ -269,6 +600,7 @@ class HalkaURI{
 
 // Route
 
+// Route Indexes
 define('ROUTE_COMP_VALUE_IDX', 0);
 define('ROUTE_COMP_TYPE_IDX', 1);
 define('ROUTE_NAME_IDX', 2);
@@ -280,6 +612,7 @@ define('ROUTE_END_IDX', 5);
 define('ROUTE_COMP_TYPE_COLON', 10);
 define('ROUTE_COMP_TYPE_REGEX', 11);
 define('ROUTE_COMP_TYPE_STRING', 12);
+
 
 
 class HalkaRoute{
@@ -334,7 +667,13 @@ class HalkaRoute{
     }
 
     function make_url($params=[]){
-        if(sort(array_keys($params)) != sort(array_keys($this->param_name_2_comp_idx))){
+		$param_keys = array_keys($params);
+		$params_keys_sorted = sort($param_keys);
+		
+		$comp_keys = array_keys($this->param_name_2_comp_idx);
+		$comp_keys_sorted = sort($comp_keys);
+		
+        if($params_keys_sorted != $comp_keys_sorted){
             /*
              * This test also covers: count($this->param_name_2_comp_idx) !== count($params)
              */
@@ -371,9 +710,6 @@ class HalkaRoute{
             }
         }
         $new_url = join('/', $new_url_comps);
-        if(!HALKA_CLEAN_URL){
-            $new_url = HALKA_BASE_URL . '/' . HALKA_FRONTSCRIPT . '/' . $new_url;
-        }
         return $new_url;
     }
 
@@ -466,9 +802,8 @@ class HalkaRoute{
     }
 }
 
+
 // halka default views.
-
-
 function halka_view_forbidden(HalkaRequest $r){
 
     echo "You have entered into area 51 - don't access php files directly";
@@ -528,9 +863,21 @@ class HalkaRouter{
         return $this->routes;
     }
 
-    function make_url($route_name, $params=[]){
+    function make_url($route_name, $params=[], $query_params=[]){
         $route = $this->routes[$this->route_name_2_route_idx[$route_name]]['route'];
-        return $route->make_url($params);
+        $url = $route->make_url($params);
+	
+		$url_with_query = $query_params ? $url . '?' . http_build_query($query_params) : $url;
+		
+		$new_url = $url_with_query;
+		
+		if(!HALKA_CLEAN_URL){
+            $new_url = '/' . HALKA_BASE_URL . '/' . HALKA_FRONTSCRIPT . '/' . $new_url;
+        }else{
+			$new_url = '/' . HALKA_BASE_URL . '/' . $new_url;
+		}
+		
+		return $new_url;
     }
 
     private function get_viewer($uri){
@@ -579,6 +926,22 @@ class HalkaRouter{
         return [$viewer, $uri_obj->get_params()];
     }
 
+    private function process_request_function($callable, $req, $resp, $app){
+        try{
+            return $callable($req, $resp, $app);
+        }catch(DoneException $e){
+            return false;
+        }
+    }
+
+    private function process_request_method($method_array, $req, $resp, $app){
+        try{
+            return call_user_func_array($method_array, [$req, $resp, $app]);
+        }catch(DoneException $e){
+            return false;
+        }
+    }
+
     function exec_viewer($uri){
         $uri = halka_trim_url($uri);
         // start request processing.
@@ -588,93 +951,164 @@ class HalkaRouter{
         $route_params = $viewer_n_params[1];
 
         if(function_exists($viewer) || class_exists($viewer)){
-            ob_start(null, 0, PHP_OUTPUT_HANDLER_CLEANABLE);
             $req = new HalkaRequest($route_params);
             $resp = new HalkaResponse();
+			$resp->start_buffering();
 
             // try: to catch non-publicly showable errors
+			
+			// function viewer processing
             if(function_exists($viewer)){
-                $viewer($req, $resp);
+                $app = new HalkaApp($this, new HalkaViewer());
+                $this->process_request_function($viewer, $req, $resp, $app);
+			// class viewer processing
             }else{
                 $cls = $viewer;
-                if( !is_subclass_of($cls, 'HalkaView') ){
+                if( !is_subclass_of($cls, 'HalkaViewer') ){
                     die("View class must be a subclass of View");
                 }
-                $view_obj = new $cls();
+                $viewer_obj = new $cls();
+                $app = new HalkaApp($this, $viewer_obj);
                 $method = strtolower($_SERVER['REQUEST_METHOD']);
-                if(!method_exists($view_obj, $method)){
-                    call_user_func_array([$view_obj, '_method_handler_missing'], [strtoupper($method), $req, $resp]);
-                }else{
-                    call_user_func_array([$view_obj, $method], [$req, $resp]);
-                }
+				
+				// before processing.
+				$before_returned = $this->process_request_method([$viewer_obj, 'before'], $req, $resp, $app);
+				$method_returned = null;
+				if($before_returned !== false){
+					if(!method_exists($viewer_obj, $method)){
+						$method_returned = call_user_func_array([$viewer_obj, '_method_handler_missing'], [strtoupper($method), $req, $resp, $app]);
+					}else{
+                        $method_returned = $this->process_request_method([$viewer_obj, $method], $req, $resp, $app);
+					}
+				}
+				if($method_returned !== false){
+                    $after_returned = $this->process_request_method([$viewer_obj, 'after'], $req, $resp, $app);
+				}
+				// no use of $after returned values.
             }
-
-            // request pre-output processing
-            $code = $resp->_get_response_code();
-            if($code){
-                http_response_code($code);
-            }
-
-            $headers = $resp->_get_headers();
-            if($headers){
-                foreach ($headers as $key => $value){
-                    header("$key: $value");
-                }
-            }
-            $sessions = $resp->_get_session();
-            if($sessions){
-                // do session processing
-                //session_start();
-                // remove all session variables
-                //session_unset();
-                // destroy the session
-                //session_destroy();
-            }
-
-            $buffer_contents = ob_get_contents();
-            ob_clean();
-            // ob_end_clean();
-            // do some middleware stuffs.
-            // process the session & header stuffs
-            if($buffer_contents !== ''){
-                echo $buffer_contents;
-            }
-            // execute deferreds
-            $deferreds = $resp->_get_deferreds();
-            foreach($deferreds as $defer){
-                $defer();
-            }
-
             // catch: the errors and process.
+			
+			// echo buffered cnts.
+			
+			$buffered_contents = $resp->stop_buffering();
+			
+			if($buffered_contents !== ''){
+				// do some middleware stuffs with the content if needed.
+				echo $buffered_contents;
+			}
         }else{
             die("View function called $viewer does not exist.");
         }
     }
 }
-class_alias('HalkaRouter', 'Router');
 
-$_router = new HalkaRouter($halka_routes);
+class HalkaApp{
+    private $router;
+    private $viewer;
+    function __construct(HalkaRouter $router, HalkaViewer $viewer) {
+        $this->router = $router;
+        $this->viewer = $viewer;
+    }
 
-function get_url($route_name, $params=[]){
-    global $_router;
-    return $_router->make_url($route_name, $params);
+    function get_url($route_name, $params=[], $query_params=[]){
+        $url = $this->router->make_url($route_name, $params, $query_params);
+        return $url;
+    }
+
+    function echo_get_url($route_name, $params=[], $query_params=[]){
+        $url = $this->get_url($route_name, $params, $query_params);
+        echo $url;
+        return $url;
+    }
+
+    function asset_url($name){
+        // no need of thinking about clean url here as it is not dynamic content.
+        return '/' . HALKA_BASE_URL . '/' . 'assets' . '/' . $name;
+    }
+
+    function echo_asset_url($name){
+        $url = asset_url($name);
+        echo $url;
+        return $url;
+    }
+
+    function load_view($name, $ctx=[], $file_ext=''){
+        $this->viewer->load_view($name, $ctx, $file_ext);
+    }
 }
 
-function load_url($route_name, $params=[]){
-    $url = get_url($route_name, $params);
-    echo $url;
-    return $url;
+function halka_boot_app(){
+    // future plan for multi app/ multi domain/ multi directory.
 }
 
-function asset_url($name){
-    // no need of thinking about clean url here as it is not dynamic content.
-    return '/' . HALKA_BASE_URL . '/' . $name;
-}
+function start_halka(){
+    if (!defined('HALKA_BASEDIR')){
+        define('HALKA_BASEDIR', __DIR__);
+    }
 
-function load_asset_url($name){
-    $url = asset_url($name);
-    echo $url;
-    return $url;
-}
+    if (!defined('HALKA_FRONTSCRIPT')){
+        define('HALKA_FRONTSCRIPT', basename(__FILE__));
+    }
 
-$_router->exec_viewer(HALKA_CURRENT_URL);
+    define('HALKA_UTILS_DIR', HALKA_BASEDIR . '/' . 'utils');
+    define('HALKA_VIEWS_DIR', HALKA_BASEDIR . '/' . 'views');
+    define('HALKA_VIEWERS_DIR', HALKA_BASEDIR . '/' . 'viewers');
+    define('HALKA_MODELS_DIR', HALKA_BASEDIR . '/' . 'models');
+
+    define('HALKA_ASSETS_DIR', HALKA_BASEDIR . 'assets');
+
+    $halka_routes = [];
+    $halka_settings = [];
+
+    // require necessary files.
+    $routes = halka_require_if_exists(HALKA_BASEDIR . '/routes.php');
+    $settings = halka_require_if_exists(HALKA_BASEDIR . '/settings.php');
+    halka_require_if_exists(HALKA_UTILS_DIR . '/__autoload__.php');
+    halka_require_if_exists(HALKA_BASEDIR . '/viewers/functions.php');
+    halka_require_if_exists(HALKA_BASEDIR . '/viewers/classes.php');  // classes can have dependency of functions required above.
+    halka_require_if_exists(HALKA_VIEWERS_DIR . '/__autoload__.php');
+    halka_require_if_exists(HALKA_VIEWS_DIR . '/__autoload__.php');
+    halka_require_if_exists(HALKA_MODELS_DIR . '/__autoload__.php');
+
+
+    // require post processing
+    if($routes){
+        $halka_routes = array_merge($halka_routes, $routes);
+    }
+    unset($routes);
+
+    if($settings){
+        $halka_settings = array_merge($halka_settings, $settings);
+    }
+    unset($settings);
+
+    // require from settings
+    if(isset($halka_settings['require'])){
+        $to_require = $halka_settings['require'];
+        if (is_string($to_require)){
+            halka_require(HALKA_BASEDIR . '/' . $to_require);
+        }elseif(is_array($to_require)){
+            foreach($to_require as $fn){
+                halka_require(HALKA_BASEDIR . '/' . $to_require);
+            }
+        }
+    }
+
+    // set base url & current url
+    if(isset($halka_settings['base_url'])){
+        define('HALKA_BASE_URL', halka_trim_url($halka_settings['base_url']));
+    }else{
+        define('HALKA_BASE_URL', halka_trim_url('/'));
+    }
+
+    if(isset($halka_settings['clean_url'])){
+        define('HALKA_CLEAN_URL', $halka_settings['clean_url']);
+    }else{
+        define('HALKA_CLEAN_URL', false);
+    }
+
+    define('HALKA_CURRENT_URL', halka_trim_url(url_without_query($_SERVER['REQUEST_URI'])));
+
+    $_router = new HalkaRouter($halka_routes);
+    $_router->exec_viewer(HALKA_CURRENT_URL);
+}
