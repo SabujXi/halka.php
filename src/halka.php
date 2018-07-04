@@ -459,11 +459,20 @@ class HalkaRootTemplate{
         $this->template_local_stack = [];
     }
 
-    protected final function load_views($view_names, $ctx=[], $file_ext=''){
+    final function load_views($view_names, $ctx=[], $file_ext=''){
         foreach($view_names as $view_name){
             $this->load_view($view_name, $ctx, $file_ext);
         }
     }
+
+    final function populate_section($name, $value){
+        /*
+         * Convenient method for pre-populating section value from viewers get/post/before/after/etc. method.
+         */
+        $this->__add_to_section_map($name, $value);
+    }
+
+
 }
 
 
@@ -552,6 +561,7 @@ class HalkaSectionTemplate{  // almost sole existance of this class is for local
          * Caution: if ever the implementation of start end method changes, those must be reflected in this method to.
          *      For the sake of lesser code I am just calling __add_to_section from the root template.
          *      + No, I am not taking the shortcut as that would discard the previous content and fixing that would add up lines of code.
+         *      + Keeping it dry and also keeping it bug free until those two functions are.
          */
         $this->section_start($name);
             echo $value;
