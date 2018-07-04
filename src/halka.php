@@ -412,6 +412,9 @@ class HalkaRootTemplate{
 
 
     final function __add_to_section_map($name, $content){
+        if(array_key_exists($name, $this->global_section_map)){
+            throw new Exception("Cannot add a section value twice.");
+        }
         $this->global_section_map[$name] = $content;
     }
 
@@ -516,7 +519,9 @@ class HalkaSectionTemplate{  // almost sole existance of this class is for local
         $__prev_content = ob_get_contents();
         // cleaning template specific buffer.
         ob_clean();
-        $this->root_template->__push_content_to_stack(null, [TEMPLATE_TYPE_TEXT, $__prev_content]);
+        if($__prev_content !== ''){
+            $this->root_template->__push_content_to_stack(null, [TEMPLATE_TYPE_TEXT, $__prev_content]);
+        }
         $this->local_current_section = $name;
 
         // specific buffer for a specific section.
@@ -535,6 +540,22 @@ class HalkaSectionTemplate{  // almost sole existance of this class is for local
         // ending section specific buffer.
         ob_end_clean();
         $this->root_template->__add_to_section_map($name, $section_content);
+    }
+
+    final function section_value($name, $value){
+        /*
+         * This is equivalent to:
+         *  this->section_start($name);
+         *      echo $value;
+         *  this->section_end($name)
+         *
+         * Caution: if ever the implementation of start end method changes, those must be reflected in this method to.
+         *      For the sake of lesser code I am just calling __add_to_section from the root template.
+         *      + No, I am not taking the shortcut as that would discard the previous content and fixing that would add up lines of code.
+         */
+        $this->section_start($name);
+            echo $value;
+        $this->section_end($name);
     }
 
     final function load_view($name, $ctx=[], $file_ext=''){
