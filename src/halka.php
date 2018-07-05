@@ -144,14 +144,20 @@ class HalkaResponse{
 	protected $buffering_stopped = false;
 	
 	protected $committed = false;
+
+    private $buffer;
 	
 	function start_buffering(){
+	    /*
 		if($this->buffering_started === true){
 			throw new Exception('Must not call start_buffering twice');
 		}
 		$this->buffering_started = true;
-		ob_start(null, 0, PHP_OUTPUT_HANDLER_CLEANABLE | PHP_OUTPUT_HANDLER_REMOVABLE);
-	}
+		// ob_start(null, 0, PHP_OUTPUT_HANDLER_CLEANABLE | PHP_OUTPUT_HANDLER_REMOVABLE);
+	    */
+        $this->buffer->start();
+        $this->buffering_started = true;
+    }
 	
 	private function _stop_buffering(){
 		if ($this->buffering_started === false){
@@ -162,6 +168,7 @@ class HalkaResponse{
 			throw new Exception('Cannot stop buffer twice');
 		}
 		$this->buffering_stopped = true;
+        return $this->buffer->get_all_content();
 	}
 	
 	private	function commit(){
@@ -205,27 +212,26 @@ class HalkaResponse{
 		$this->headers = [];
 		
 		// turn off buffering if not off and flush content.
-		$this->_stop_buffering();
-		
-		$buffer_contents = ob_get_contents();
-            // ob_clean();
-            // ob_end_clean();
+        if($this->buffer->is_on()){
+            $buffer_contents = $this->_stop_buffering();
             // do some middleware stuffs in where it goes.
             // process the session & header stuffs: done before.
-		
-		ob_end_clean();
-		
-		$this->committed = true;
-		
-		return $buffer_contents;
+            echo $buffer_contents;
+        }
+        $this->committed = true;
 	}
 	
 	function stop_buffering(){
 		if($this->buffering_stopped !== true){
-			return $this->commit();
+			$this->commit();
 		}
-		return '';
 	}
+
+	function disable_content_buffering(){
+	    // discards and disables.
+	    $this->buffer->disable();
+        $this->buffering_stopped = true;
+    }
 	
 	function buffering_stopped(){
 		return $this->buffering_stopped;
@@ -243,7 +249,7 @@ class HalkaResponse{
 		if($this->buffering_started !== true){
 			throw new Exception('Cannot discard buffer when it never started.');
 		}
-		ob_clean();
+		$this->buffer->clean_all();
 	}
 	
 	function discard_session(){
@@ -258,9 +264,10 @@ class HalkaResponse{
 		$this->discard_session();
 	}
 
-    function __construct(){}
+    function __construct(HalkaBuffer $buffer){$this->buffer = $buffer;}
 
     function done(){
+        $this->buffer->flush_all();
         throw new DoneException();
     }
 
@@ -305,11 +312,13 @@ class HalkaResponse{
 		if($this->buffering_stopped === true){
 			throw new Exception('Cannot set header in unbufferred mode');
 		}
+		// if buffer is disabled - set immediately
 		
         $this->headers[$key] = $value;
     }
 
     function set_response_code($code){
+        // if buffer is disabled - set immediately
 		if($this->buffering_stopped === true){
 			throw new Exception('Cannot set response in unbufferred mode');
 		}
@@ -318,6 +327,7 @@ class HalkaResponse{
     }
 	
     private function _get_session(){
+        // if buffer is disabled - throw exception
         return $this->session;
     }
 
@@ -363,6 +373,105 @@ trait _ExtraTemplateMethods{
         $this->app->echo_asset_url($name);
     }
 }
+
+final class HalkaBuffer{
+    private $initial_level;
+    private $current_level;
+    function __construct($initial_level=0) {
+        $this->initial_level = $initial_level;
+        $this->current_level = $this->initial_level;
+    }
+
+    function start(){
+        // start at any nesting.
+        ob_start(null, 0, PHP_OUTPUT_HANDLER_CLEANABLE | PHP_OUTPUT_HANDLER_REMOVABLE | PHP_OUTPUT_HANDLER_FLUSHABLE);
+        $this->current_level++;
+        return $this->current_level;
+    }
+    function is_on(){
+        return $this->current_level > $this->initial_level ? true : false;
+    }
+    function is_disabled(){
+        return $this->current_level < 0 ? true : false;
+    }
+    function clean_current(){
+        if($this->current_level <= $this->initial_level){
+            throw new Exception("clean current is not allowed when there is no buffering.");
+        }
+        ob_clean();
+    }
+
+    function clean_all(){
+        $levels = $this->current_level - $this->initial_level;
+        for($i = 0; $i < $levels; $i++){
+            if($i === 1){
+                ob_clean();
+            }
+            ob_end_clean();
+            $this->current_level--;
+        }
+    }
+
+    function end_current(){
+        if($this->current_level <= $this->initial_level){
+            throw new Exception("end current is not allowed when there is no buffering.");
+        }
+        ob_end_clean();
+        $this->current_level--;
+    }
+    function flush_current(){
+        if($this->current_level <= $this->initial_level){
+            throw new Exception("flush current is not allowed when there is no buffering.");
+        }
+        ob_flush();
+    }
+    function flush_all(){
+        if($this->current_level <= $this->initial_level){
+            throw new Exception("flush current is not allowed when there is no buffering.");
+        }
+        echo $this->get_all_content();
+    }
+    function end_all(){
+        if($this->current_level <= $this->initial_level){
+            throw new Exception("end all is not allowed when there is no buffering.");
+        }
+        $levels = $this->current_level - $this->initial_level;
+        for($i = 0; $i < $levels; $i++){
+            ob_end_clean();
+            $this->current_level--;
+        }
+    }
+    function get_current_content(){
+        if($this->current_level <= $this->initial_level){
+            throw new Exception("get content is not allowed when there is no buffering.");
+        }
+        return ob_get_contents();
+    }
+    function get_all_content(){
+        // ends all the level to gather content.
+        if($this->current_level <= $this->initial_level){
+            throw new Exception("get all content is not allowed when there is no buffering.");
+        }
+        $content = '';
+        $levels = $this->current_level - $this->initial_level;
+        for($i = 0; $i < $levels; $i++){
+            $content = ob_get_contents() . $content;
+            ob_end_clean();
+            $this->current_level--;
+        }
+        return $content;
+    }
+    function get_end_current(){
+        $this->end_current();
+        return $this->get_current_content();
+    }
+
+    function disable(){
+        $this->end_all();
+        $this->current_level = PHP_INT_MIN;
+    }
+}
+
 
 define('TEMPLATE_TYPE_TEXT', 'T');
 define('TEMPLATE_TYPE_SECTION', 'S');
@@ -471,8 +580,6 @@ class HalkaRootTemplate{
          */
         $this->__add_to_section_map($name, $value);
     }
-
-
 }
 
 
@@ -480,6 +587,7 @@ class HalkaSectionTemplate{  // almost sole existance of this class is for local
     private $app;
     private $root_template;
     private $router;
+    private $buffer;
     private $view_loaded = false;
 
     use _ExtraTemplateMethods;
@@ -488,19 +596,20 @@ class HalkaSectionTemplate{  // almost sole existance of this class is for local
         $this->app = $app;
         $this->root_template = $root_template;
         $this->router = $router;
+        $this->buffer = new HalkaBuffer();
     }
     private $local_current_section = null;
 
     final function section_declare($name){
-        $_prev_content = ob_get_contents();
-        ob_clean();
+        $_prev_content = $this->buffer->get_current_content();
+        $this->buffer->clean_current();
         $this->root_template->__push_content_to_stack(null, [TEMPLATE_TYPE_TEXT, $_prev_content]);
 
         // section declaration works in the global space - not in the local space.
         try{
             $this->root_template->__section_declare($name);//, $this->template_local_stack);
         }catch (Exception $e){
-            ob_end_flush();
+            $this->buffer->flush_all();
             // rethrow the exception
             throw $e;
         }
@@ -519,35 +628,35 @@ class HalkaSectionTemplate{  // almost sole existance of this class is for local
         */
         if(!is_null($this->local_current_section)){
             // ending section specific buffer
-            ob_end_flush();
+            $this->buffer->flush_all();
             throw new Exception("A section with name $this->local_current_section started but never ended. You started another section with name $name. What is this, man!");
         }
 
         // if there is any previous content, push that to stack.
         // content from template buffer.
-        $__prev_content = ob_get_contents();
+        $__prev_content = $this->buffer->get_current_content();
+        $this->buffer->clean_current();
         // cleaning template specific buffer.
-        ob_clean();
         if($__prev_content !== ''){
             $this->root_template->__push_content_to_stack(null, [TEMPLATE_TYPE_TEXT, $__prev_content]);
         }
         $this->local_current_section = $name;
 
         // specific buffer for a specific section.
-        ob_start(null, 0, PHP_OUTPUT_HANDLER_CLEANABLE | PHP_OUTPUT_HANDLER_REMOVABLE | PHP_OUTPUT_HANDLER_FLUSHABLE);
+        $this->buffer->start();
     }
 
     final function section_end($name){
         if($this->local_current_section !== $name){
             // ending section specific buffer.
-            ob_end_flush();
+            $this->buffer->flush_all();
             throw new Exception("Current section $this->local_current_section did not end when you want to end section $name. Too err is human, fix it!");
         }
         // content section buffer.
-        $section_content = ob_get_contents();
+        $section_content = $this->buffer->get_current_content();
+        $this->buffer->clean_current();
         $this->local_current_section = null;
         // ending section specific buffer.
-        ob_end_clean();
         $this->root_template->__add_to_section_map($name, $section_content);
     }
 
@@ -571,8 +680,8 @@ class HalkaSectionTemplate{  // almost sole existance of this class is for local
     final function load_view($name, $ctx=[], $file_ext=''){
         if ($this->view_loaded === true){
             // push any orphan content
-            $_prev_content = ob_get_contents();
-            ob_clean();
+            $_prev_content = $this->buffer->get_current_content();
+            $this->buffer->clean_current();
             $this->root_template->__push_content_to_stack(null, [TEMPLATE_TYPE_TEXT, $_prev_content]);
             // throw new Exception("Cannot be loaded twice.");
             $template = new self($this->root_template, $this->router, $this->app);
@@ -583,25 +692,31 @@ class HalkaSectionTemplate{  // almost sole existance of this class is for local
         $this->view_loaded = true;
 
         // buffering for templating.
-        ob_start(null, 0, PHP_OUTPUT_HANDLER_CLEANABLE | PHP_OUTPUT_HANDLER_REMOVABLE | PHP_OUTPUT_HANDLER_FLUSHABLE);
+        $this->buffer->start();
 
         $ctx['template'] = $this;
         $this->router->_halka_load_view($name, $ctx, $file_ext);
         // if a section was not ended, throw here.
         if(!is_null($this->local_current_section)){
+            /*
             ob_end_flush(); // for buffer started in section_/start/end/declare.
             ob_end_flush(); // for buffer template buffer/this load_view function.
+            */
+            $this->buffer->flush_all();
             throw new Exception("A section with name $this->local_current_section never ended.");
         }else{
-            $__end_contents = ob_get_contents();
+            // $__end_contents = ob_get_contents();
+            $__end_contents = $this->buffer->get_current_content();
+            $this->buffer->clean_current();
             $this->root_template->__push_content_to_stack(null, [TEMPLATE_TYPE_TEXT, $__end_contents]);
         }
         // completely clean the content as we no longer need them.
-        ob_end_clean();
+        $this->buffer->end_all();
         $this->local_current_section = null;
         unset($this->root_template);
         unset($this->router);
         unset($this->app);
+        unset($this->buffer);
     }
 
 }
@@ -939,7 +1054,6 @@ class HalkaRouter{
     function __construct(HalkaApp $app, $routes) {
         $this->app = $app;
         $this->parse_routes($routes);
-//        var_dump($this->routes);
     }
 
     function get_routes(){
@@ -1063,48 +1177,47 @@ class HalkaRouter{
         });
 
         if($class_or_function_exists){
+            $response_buffer = new HalkaBuffer();
             $req = new HalkaRequest($route_params);
-            $resp = new HalkaResponse();
+            $resp = new HalkaResponse($response_buffer);
             $root_template = new HalkaRootTemplate($this, $this->app);
 			$resp->start_buffering();
 
             // try: to catch non-publicly showable errors
+            try{
+                // function viewer processing
+                if(function_exists($viewer)){
+                    $this->process_request_function($viewer, $req, $resp, $root_template);
+                // class viewer processing
+                }else{
+                    $cls = $viewer;
+                    if( !is_subclass_of($cls, 'HalkaViewer') ){
+                        die("View class must be a subclass of View");
+                    }
+                    $viewer_obj = new $cls();
+                    $method = strtolower($_SERVER['REQUEST_METHOD']);
 
-			// function viewer processing
-            if(function_exists($viewer)){
-                $this->process_request_function($viewer, $req, $resp, $root_template);
-			// class viewer processing
-            }else{
-                $cls = $viewer;
-                if( !is_subclass_of($cls, 'HalkaViewer') ){
-                    die("View class must be a subclass of View");
+                    // before processing.
+                    $before_returned = $this->process_request_method([$viewer_obj, 'before'], [$req, $resp, $root_template]);
+                    $method_returned = null;
+                    if($before_returned !== false){
+                        if(!method_exists($viewer_obj, $method)){
+                            $method_returned = call_user_func_array([$viewer_obj, '_method_handler_missing'], [strtoupper($method), $req, $resp, $root_template]);
+                        }else{
+                            $method_returned = $this->process_request_method([$viewer_obj, $method], [$req, $resp, $root_template]);
+                        }
+                    }
+                    if($method_returned !== false){
+                        $after_returned = $this->process_request_method([$viewer_obj, 'after'], [$req, $resp, $root_template]);
+                    }
+                    // no use of $after returned values.
                 }
-                $viewer_obj = new $cls();
-                $method = strtolower($_SERVER['REQUEST_METHOD']);
-				
-				// before processing.
-				$before_returned = $this->process_request_method([$viewer_obj, 'before'], [$req, $resp, $root_template]);
-				$method_returned = null;
-				if($before_returned !== false){
-					if(!method_exists($viewer_obj, $method)){
-						$method_returned = call_user_func_array([$viewer_obj, '_method_handler_missing'], [strtoupper($method), $req, $resp, $root_template]);
-					}else{
-                        $method_returned = $this->process_request_method([$viewer_obj, $method], [$req, $resp, $root_template]);
-					}
-				}
-				if($method_returned !== false){
-                    $after_returned = $this->process_request_method([$viewer_obj, 'after'], [$req, $resp, $root_template]);
-				}
-				// no use of $after returned values.
+                // catch: the errors and process.
+            }catch(DoneException $de){
+                // go on to the next step: stop buffer/commit.
+                // throw $de;? - no
             }
-            // catch: the errors and process.
-			
-			$buffered_contents = $resp->stop_buffering();
-			
-			if($buffered_contents !== ''){
-				// do some middleware stuffs with the content if needed.
-				echo $buffered_contents;
-			}
+			$resp->stop_buffering();
         }else{
             die("View function/class called $viewer does not exist.");
         }
