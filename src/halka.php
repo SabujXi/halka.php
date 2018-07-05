@@ -613,11 +613,11 @@ class HalkaViewer{
 	
 	function __construct(){}
 	
-	function before(HalkaRequest $req, HalkaResponse $resp){}
+	function before(HalkaRequest $req, HalkaResponse $resp, $template){}
 	
-	function after(HalkaRequest $req, HalkaResponse $resp){}
+	function after(HalkaRequest $req, HalkaResponse $resp, $template){}
 	
-	final function _method_handler_missing($method, $req, $resp, $app){
+	final function _method_handler_missing($method, $req, $resp, $template){
 		die("Method $method: hendler missing");
 		// return false when not dying. That result will be used to determine whether after and deferred should be executed.
 	}
@@ -1083,7 +1083,7 @@ class HalkaRouter{
                 $method = strtolower($_SERVER['REQUEST_METHOD']);
 				
 				// before processing.
-				$before_returned = $this->process_request_method([$viewer_obj, 'before'], [$req, $resp]);
+				$before_returned = $this->process_request_method([$viewer_obj, 'before'], [$req, $resp, $root_template]);
 				$method_returned = null;
 				if($before_returned !== false){
 					if(!method_exists($viewer_obj, $method)){
@@ -1093,7 +1093,7 @@ class HalkaRouter{
 					}
 				}
 				if($method_returned !== false){
-                    $after_returned = $this->process_request_method([$viewer_obj, 'after'], [$req, $resp]);
+                    $after_returned = $this->process_request_method([$viewer_obj, 'after'], [$req, $resp, $root_template]);
 				}
 				// no use of $after returned values.
             }
